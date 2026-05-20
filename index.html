@@ -1,7 +1,10 @@
 <!-- ═══════════════════════════════════════════════════════════════════
-     SUMMER OF HAPPY — Family Dashboard v5 (Kajabi Embed)
-     Paste this entire file into a Kajabi Custom Code Block.
+     SUMMER OF HAPPY — Family Dashboard v5
+     Single-file HTML — host on GitHub Pages, Netlify, or any static host.
      ═══════════════════════════════════════════════════════════════════ -->
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+<meta name="theme-color" content="#FFF4D6">
 
 <style>
   #soh-dashboard-root, #soh-dashboard-root * { box-sizing: border-box; }
@@ -737,7 +740,7 @@ function SummerDashboard() {
 
   // ═════════════════════════════════════════════════════════════════
   return (
-    <div style={{ background: C.cream, color: C.ink, padding: '40px 16px 80px',
+    <div className="soh-dash-root" style={{ background: C.cream, color: C.ink, padding: '40px 16px 80px',
       position: 'relative', overflow: 'hidden', borderRadius: 16 }}>
       <style>{`
         .soh-scribble-card { background: ${C.paper}; border-radius: 20px; padding: 24px;
@@ -756,6 +759,24 @@ function SummerDashboard() {
         .soh-float { animation: soh-float 4s ease-in-out infinite; }
         @keyframes soh-pop { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
         .soh-pop { animation: soh-pop 0.4s ease-out; }
+
+        /* Responsive form grids — stack on mobile */
+        .soh-form-grid { display: grid; gap: 10px; }
+        .soh-form-grid.cols-add4 { grid-template-columns: 1.4fr 0.9fr 0.9fr auto; }
+        .soh-form-grid.cols-add3 { grid-template-columns: 1.4fr 0.9fr 0.9fr auto; }
+        .soh-form-grid.cols-goal5 { grid-template-columns: 1.3fr 70px 0.9fr 0.9fr auto; }
+        .soh-form-grid.cols-reward { grid-template-columns: 1.4fr 0.7fr 1fr auto; }
+        .soh-form-grid.cols-event { grid-template-columns: 0.8fr 1.4fr 1fr auto; }
+
+        @media (max-width: 640px) {
+          .soh-scribble-card { padding: 16px; border-radius: 16px; }
+          .soh-form-grid { grid-template-columns: 1fr !important; }
+          .soh-form-grid .soh-pill-btn { width: 100%; }
+          .soh-mobile-hide { display: none !important; }
+          .soh-mobile-stack { flex-direction: column !important; align-items: stretch !important; }
+          .soh-mobile-full { width: 100% !important; }
+          .soh-dash-root { padding: 24px 12px 60px !important; border-radius: 0 !important; }
+        }
       `}</style>
 
       <div style={{ maxWidth: 1000, margin: '0 auto', position: 'relative' }}>
@@ -832,7 +853,7 @@ function SummerDashboard() {
         {/* ─── READING ─── */}
         <SectionLabel title="summer reading challenge" icon={<IconBook size={20} />} accent={C.sage} />
         <div className="soh-scribble-card" style={{ marginBottom: 56 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.9fr 0.9fr auto', gap: 10, marginBottom: 18 }}>
+          <div className="soh-form-grid cols-add3" style={{ marginBottom: 18 }}>
             <input className="soh-input" value={newReading.title}
               onChange={e => setNewReading({ ...newReading, title: e.target.value })}
               placeholder="Book title..." onKeyDown={e => e.key === 'Enter' && addReading()} />
@@ -898,7 +919,7 @@ function SummerDashboard() {
               <span>The family has knocked out <strong style={{ fontSize: 18 }}>{totalResp}</strong> responsibilities so far. Way to go!</span>
             </div>
           )}
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.9fr 0.9fr auto', gap: 10, marginBottom: 12 }}>
+          <div className="soh-form-grid cols-add3" style={{ marginBottom: 12 }}>
             <input className="soh-input" value={newResp.text}
               onChange={e => setNewResp({ ...newResp, text: e.target.value })}
               placeholder="Add a responsibility..." onKeyDown={e => e.key === 'Enter' && addResp()} />
@@ -1010,7 +1031,7 @@ function SummerDashboard() {
         {/* ─── PERSONAL GOALS ─── */}
         <SectionLabel title="personal goals" icon={<IconTarget size={20} />} accent={C.navy} />
         <div className="soh-scribble-card" style={{ marginBottom: 56 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 70px 0.9fr 0.9fr auto', gap: 10, marginBottom: 18 }}>
+          <div className="soh-form-grid cols-goal5" style={{ marginBottom: 18 }}>
             <input className="soh-input" value={newGoal.title}
               onChange={e => setNewGoal({ ...newGoal, title: e.target.value })} placeholder="Learn guitar..." />
             <input className="soh-input" value={newGoal.target}
@@ -1077,7 +1098,7 @@ function SummerDashboard() {
             <IconAward size={18} />
             <span>Total badges earned: <strong style={{ fontSize: 18 }}>{totalBadgesEarned}</strong></span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.7fr 1fr auto', gap: 10, marginBottom: 18 }}>
+          <div className="soh-form-grid cols-reward" style={{ marginBottom: 18 }}>
             <input className="soh-input" value={newReward.title}
               onChange={e => setNewReward({ ...newReward, title: e.target.value })} placeholder="Pizza party..." />
             <input className="soh-input" value={newReward.badgeCount}
@@ -1211,7 +1232,7 @@ function StickerHeader({ themeWord, themeYear, editing, setEditing, setWord, set
           position: 'relative',
           background: C.paper,
           borderRadius: 32,
-          padding: '40px 56px',
+          padding: 'clamp(28px, 5vw, 40px) clamp(20px, 5vw, 56px)',
           boxShadow: `0 8px 24px ${C.ink}15, 0 2px 0 ${C.ink}10`,
         }}>
           <div style={{ display: 'inline-block', background: C.coral, color: 'white',
@@ -1516,7 +1537,7 @@ function CalendarSection({ open, setOpen, view, setView, monthOffset, setMonthOf
           </div>
 
           {/* Add event form */}
-          <div style={{ display: 'grid', gridTemplateColumns: '0.8fr 1.4fr 1fr auto', gap: 10, marginBottom: 18 }}>
+          <div className="soh-form-grid cols-event" style={{ marginBottom: 18 }}>
             <input type="date" className="soh-input" value={newEvent.date}
               onChange={e => setNewEvent({ ...newEvent, date: e.target.value })} />
             <input className="soh-input" value={newEvent.title}
@@ -1762,7 +1783,8 @@ function WeekView({ eventsByDate, removeEvent }) {
     days.push(d);
   }
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8 }}>
+    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(90px, 1fr))', gap: 8, minWidth: '100%' }}>
       {days.map((d, i) => {
         const iso = formatISO(d);
         const dayEvents = eventsByDate[iso] || [];
@@ -1792,6 +1814,7 @@ function WeekView({ eventsByDate, removeEvent }) {
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
@@ -2878,6 +2901,15 @@ function FamilyMeeting({ existingFamily, existingBucket, existingTheme, existing
         .soh-fade { animation: soh-fade 0.4s ease-out; }
         @keyframes soh-pop-big { 0% { transform: scale(0.3); opacity: 0; } 70% { transform: scale(1.1); } 100% { transform: scale(1); opacity: 1; } }
         .soh-pop-big { animation: soh-pop-big 0.7s ease-out; }
+
+        @media (max-width: 640px) {
+          .soh-wiz-crew-form { grid-template-columns: 1fr !important; }
+          .soh-wiz-crew-form > select { width: 100% !important; }
+          .soh-wiz-goal-form { grid-template-columns: 1fr 80px !important; }
+          .soh-wiz-goal-form > .soh-pill-btn { grid-column: span 2; }
+          .soh-promise-grid { grid-template-columns: 1fr !important; }
+          .soh-pill-btn { padding: 10px 18px; font-size: 14px; }
+        }
       `}</style>
 
       <div style={{ maxWidth: 720, margin: '0 auto', position: 'relative' }}>
@@ -2957,7 +2989,7 @@ function WizardWelcome({ onStart, onCancel }) {
       <DecorSticker style={{ top: 240, right: '10%' }} rotate={14} size={24}><Dot color={C.dustyblue} /></DecorSticker>
 
       <div style={{ position: 'relative', display: 'inline-block', maxWidth: '95%',
-        background: C.paper, borderRadius: 32, padding: '40px 56px',
+        background: C.paper, borderRadius: 32, padding: 'clamp(28px, 5vw, 40px) clamp(20px, 5vw, 56px)',
         boxShadow: `0 8px 24px ${C.ink}15, 0 2px 0 ${C.ink}10` }}>
         <div style={{ display: 'inline-block', background: C.coral, color: 'white',
           padding: '4px 14px', borderRadius: 4, fontFamily: '"Fraunces", serif',
@@ -3020,7 +3052,7 @@ function WizardCrew({ members, setMembers, onNext, onBack }) {
       <WizardHeader title="Who's on the crew?" subtitle="Add each family member, one at a time. Pass the laptop and let everyone pick their own emoji and color." />
 
       <div className="soh-scribble-card" style={{ background: C.paper, borderRadius: 20, padding: 24, marginBottom: 20, boxShadow: `0 2px 0 ${C.ink}15, 0 8px 24px ${C.ink}08` }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr auto', gap: 10, marginBottom: 14 }}>
+        <div className="soh-wiz-crew-form" style={{ display: 'grid', gridTemplateColumns: '90px 1fr auto', gap: 10, marginBottom: 14 }}>
           <select className="soh-input" value={emoji} onChange={e => setEmoji(e.target.value)}
             style={{ fontSize: 22, cursor: 'pointer' }}>
             {EMOJI_OPTIONS.map(em => <option key={em} value={em}>{em}</option>)}
@@ -3473,7 +3505,7 @@ function WizardBucketGoals({ members, bucketItems, setBucketItems,
               textTransform: 'uppercase', opacity: 0.6, marginBottom: 8 }}>
               {active.name}'s goals 🎯
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 80px auto', gap: 8, marginBottom: 12 }}>
+            <div className="soh-wiz-goal-form" style={{ display: 'grid', gridTemplateColumns: '1.5fr 80px auto', gap: 8, marginBottom: 12 }}>
               <input className="soh-input" value={newGoalTitle}
                 onChange={e => setNewGoalTitle(e.target.value)}
                 placeholder="Learn 5 guitar chords..."
@@ -3854,7 +3886,7 @@ function WizardPromise({ themeWord, members, bucketItems, badgePlan, onLaunch, o
 
       <div className="soh-pop-big" style={{
         display: 'inline-block', background: C.paper, borderRadius: 32,
-        padding: '40px 40px 32px', boxShadow: `0 8px 24px ${C.ink}15, 0 2px 0 ${C.ink}10`,
+        padding: 'clamp(24px, 5vw, 40px) clamp(20px, 5vw, 40px) 32px', boxShadow: `0 8px 24px ${C.ink}15, 0 2px 0 ${C.ink}10`,
         maxWidth: 720, width: '100%', textAlign: 'left',
       }}>
         {/* The Family Promise itself — also serves as the print template */}
@@ -3930,7 +3962,7 @@ function PromisePrintable({ themeWord, members, bucketItems, promiseParagraph })
       </p>
 
       {/* Each family member gets their own colored box */}
-      <div style={{ display: 'grid', gridTemplateColumns: members.length > 2 ? '1fr 1fr' : '1fr', gap: 14, marginBottom: 24 }}>
+      <div className="soh-promise-grid" style={{ display: 'grid', gridTemplateColumns: members.length > 2 ? '1fr 1fr' : '1fr', gap: 14, marginBottom: 24 }}>
         {members.map(m => (
           <div key={m.id} style={{
             background: '#ffffff',
@@ -4204,7 +4236,7 @@ function LoginScreen({ onLogin }) {
 
         <div style={{
           position: 'relative', display: 'inline-block', maxWidth: '95%',
-          background: C.paper, borderRadius: 32, padding: '40px 40px 32px',
+          background: C.paper, borderRadius: 32, padding: 'clamp(24px, 5vw, 40px) clamp(20px, 5vw, 40px) 32px',
           boxShadow: `0 8px 24px ${C.ink}15, 0 2px 0 ${C.ink}10`,
         }}>
           <div style={{
@@ -4217,7 +4249,15 @@ function LoginScreen({ onLogin }) {
           </div>
 
           <h1 style={{ margin: 0, lineHeight: 1.05 }}>
-            {rainbowText(rememberedEmail ? 'WELCOME BACK!' : 'WELCOME!', 'clamp(36px, 6.5vw, 64px)')}
+            {rememberedEmail ? (
+              <React.Fragment>
+                {rainbowText('WELCOME', 'clamp(36px, 7vw, 64px)')}
+                <br />
+                {rainbowText('BACK!', 'clamp(36px, 7vw, 64px)')}
+              </React.Fragment>
+            ) : (
+              rainbowText('WELCOME!', 'clamp(40px, 9vw, 72px)')
+            )}
           </h1>
 
           <p style={{ marginTop: 24, fontSize: 16, lineHeight: 1.6, color: C.ink, opacity: 0.85, maxWidth: 440 }}>
