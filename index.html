@@ -1269,15 +1269,19 @@ function SummerDashboard() {
 
         {/* ─── REWARDS ─── */}
         <SectionLabel title="family rewards" icon={<IconGift size={20} />} accent={C.rose} />
+        <p style={{ fontSize: 13, opacity: 0.7, margin: '-12px 0 14px 4px', maxWidth: 560, lineHeight: 1.5 }}>
+          Set little prizes that grow with your badge count — 5 badges = ice cream night, 25 = a real adventure.
+          The whole family pulls in the same direction.
+        </p>
         <div className="soh-scribble-card" style={{ marginBottom: 32 }}>
-          <div style={{ background: C.butter, borderRadius: 12, padding: '10px 14px',
-            marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600, fontSize: 14 }}>
-            <IconAward size={18} />
-            <span>Total badges earned: <strong style={{ fontSize: 18 }}>{totalBadgesEarned}</strong></span>
-          </div>
-          <div className="soh-form-grid cols-reward" style={{ marginBottom: 18 }}>
+          {/* THE REWARD LADDER — shows current progress + upcoming milestones */}
+          <RewardLadder rewards={rewards} totalBadgesEarned={totalBadgesEarned}
+            badgesByMember={badgesByMember} family={family} />
+
+          <div className="soh-form-grid cols-reward" style={{ marginBottom: 14 }}>
             <input className="soh-input" value={newReward.title}
-              onChange={e => setNewReward({ ...newReward, title: e.target.value })} placeholder="Pizza party..." />
+              onChange={e => setNewReward({ ...newReward, title: e.target.value })}
+              placeholder="Ice cream night, pizza party, day trip..." />
             <input className="soh-input" value={newReward.badgeCount}
               onChange={e => setNewReward({ ...newReward, badgeCount: e.target.value })}
               placeholder="# badges" type="number" />
@@ -1292,7 +1296,9 @@ function SummerDashboard() {
             </button>
           </div>
           {rewards.length === 0 ? (
-            <EmptyState text="Set rewards your family will unlock as you earn badges together!" />
+            <RewardEmptyState onAddExample={(title, count) => {
+              setNewReward({ title, badgeCount: String(count), scope: 'family' });
+            }} />
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
               {[...rewards].sort((a, b) => a.badgeCount - b.badgeCount).map(r => {
@@ -3154,6 +3160,159 @@ function EmptyState({ text }) {
     <p style={{ textAlign: 'center', opacity: 0.55, padding: 20, margin: 0, fontWeight: 500, fontSize: 14 }}>
       {text}
     </p>
+  );
+}
+
+// ─── REWARD LADDER ─── shows current badge count + the next 3 milestones ahead
+function RewardLadder({ rewards, totalBadgesEarned, badgesByMember, family }) {
+  // Compute "next 3" upcoming rewards across all scopes, sorted by how close they are
+  const upcoming = useMemo(() => {
+    const all = rewards
+      .filter(r => !r.claimed)
+      .map(r => {
+        const have = r.scope === 'family' ? totalBadgesEarned : badgesByMember(r.scope);
+        return { ...r, have, remaining: Math.max(0, r.badgeCount - have),
+          pct: Math.min(100, Math.round((have / Math.max(1, r.badgeCount)) * 100)),
+          unlocked: have >= r.badgeCount };
+      });
+    // Show unlocked-but-unclaimed first (they're "ready"), then closest upcoming
+    const ready = all.filter(r => r.unlocked).slice(0, 3);
+    const next = all.filter(r => !r.unlocked).sort((a, b) => a.remaining - b.remaining).slice(0, 3 - ready.length);
+    return [...ready, ...next];
+  }, [rewards, totalBadgesEarned, family]);
+
+  // If no rewards set, show a friendly banner pointing to the form below
+  if (rewards.length === 0) {
+    return (
+      <div style={{
+        background: `linear-gradient(135deg, ${C.butter}, ${C.cream})`,
+        borderRadius: 14, padding: '14px 16px', marginBottom: 16,
+        display: 'flex', alignItems: 'center', gap: 12,
+      }}>
+        <div style={{
+          fontSize: 26, width: 44, height: 44, borderRadius: '50%',
+          background: C.paper, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: `0 2px 0 ${C.coral}25`,
+        }}>🏅</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+            <strong style={{ fontSize: 18, color: C.coral }}>{totalBadgesEarned}</strong> badges earned so far
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>
+            Add a few rewards below to see your ladder!
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      background: `linear-gradient(135deg, ${C.butter}, ${C.cream})`,
+      borderRadius: 14, padding: 16, marginBottom: 16,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+        <div style={{
+          fontSize: 26, width: 44, height: 44, borderRadius: '50%',
+          background: C.paper, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: `0 2px 0 ${C.coral}25`,
+        }}>🏅</div>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+            textTransform: 'uppercase', opacity: 0.6 }}>Badges earned</div>
+          <div style={{ fontFamily: '"Tutti Frutti", "Fraunces", serif',
+            fontSize: 24, fontWeight: 800, color: C.coral, lineHeight: 1 }}>
+            {totalBadgesEarned}
+          </div>
+        </div>
+      </div>
+
+      {upcoming.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {upcoming.map((r, i) => {
+            const scopeLabel = r.scope === 'family'
+              ? '🏡'
+              : (family.find(f => f.id === r.scope)?.emoji || '👤');
+            return (
+              <div key={r.id} style={{
+                background: r.unlocked ? `${C.coral}15` : C.paper,
+                borderRadius: 10, padding: '8px 12px',
+                display: 'flex', alignItems: 'center', gap: 10,
+                border: r.unlocked ? `1.5px solid ${C.coral}40` : `1.5px solid transparent`,
+              }}>
+                <span style={{ fontSize: 18 }}>
+                  {r.unlocked ? '🎁' : (i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉')}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontFamily: '"Tutti Frutti", "Fraunces", serif',
+                    fontSize: 14, fontWeight: 700,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {scopeLabel} {r.title}
+                  </div>
+                  <div style={{ height: 6, background: C.cream, borderRadius: 999,
+                    overflow: 'hidden', marginTop: 4 }}>
+                    <div style={{
+                      width: `${r.pct}%`, height: '100%',
+                      background: r.unlocked ? C.coral : `${C.coral}aa`,
+                      transition: 'width 0.4s ease',
+                    }} />
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.ink,
+                  whiteSpace: 'nowrap', minWidth: 70, textAlign: 'right' }}>
+                  {r.unlocked
+                    ? <span style={{ color: C.coral }}>Ready! 🎉</span>
+                    : <span>{r.remaining} to go</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── EMPTY STATE for rewards — shows example chips you can tap to pre-fill
+function RewardEmptyState({ onAddExample }) {
+  const examples = [
+    { title: 'Ice cream night', count: 5 },
+    { title: 'Pizza & movie night', count: 10 },
+    { title: 'Trampoline park trip', count: 20 },
+    { title: 'Day at the beach', count: 30 },
+    { title: 'Theme park adventure', count: 50 },
+  ];
+  return (
+    <div style={{ padding: '8px 4px 4px' }}>
+      <p style={{ textAlign: 'center', opacity: 0.65, margin: '0 0 12px',
+        fontWeight: 500, fontSize: 14 }}>
+        Stuck for ideas? Tap one to start:
+      </p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+        {examples.map(ex => (
+          <button key={ex.title} onClick={() => onAddExample(ex.title, ex.count)}
+            style={{
+              background: C.cream, color: C.ink,
+              border: `1.5px dashed ${C.ink}20`, borderRadius: 999,
+              padding: '6px 12px', fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'inherit',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = C.butter;
+              e.currentTarget.style.borderStyle = 'solid';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = C.cream;
+              e.currentTarget.style.borderStyle = 'dashed';
+            }}>
+            {ex.title} <span style={{ opacity: 0.6 }}>· {ex.count}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
