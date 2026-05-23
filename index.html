@@ -168,8 +168,8 @@ function buildSampleFamilyData() {
       { id: 701, date: daysAhead(2), title: 'Swim lessons start', memberId: sadie.id },
       { id: 702, date: daysAhead(5), title: 'Family pizza night', memberId: 'family' },
       { id: 703, date: daysAhead(14), title: 'Trip to Grandma\'s', memberId: 'family' },
-      { id: 704, date: daysAhead(20), title: 'Caden\'s Lego camp', memberId: caden.id },
-      { id: 705, date: daysAhead(30), title: 'Beach week!', memberId: 'family' },
+      { id: 704, date: daysAhead(20), endDate: daysAhead(24), title: 'Caden\'s Lego camp', memberId: caden.id },
+      { id: 705, date: daysAhead(30), endDate: daysAhead(36), title: 'Beach week!', memberId: 'family' },
       { id: 706, date: daysAgo(7), title: 'Library reading challenge kickoff', memberId: 'family' },
     ],
     mindsetCheckins: {
@@ -482,7 +482,7 @@ function SummerDashboard() {
   const [reading, setReading] = useState([]);
   const [rewards, setRewards] = useState([]);
   const [responsibilities, setResponsibilities] = useState([]); // {id, memberId, text, frequency, completions, log}
-  const [events, setEvents] = useState([]);            // {id, date, title, memberId, photo}
+  const [events, setEvents] = useState([]);            // {id, date, endDate?, title, memberId, photo}
   const [mindsetCheckins, setMindsetCheckins] = useState({});
   const [photos, setPhotos] = useState([]);            // {id, dataUrl, caption, date}
   const [badgePlan, setBadgePlan] = useState(DEFAULT_BADGE_PLAN);
@@ -499,7 +499,7 @@ function SummerDashboard() {
   const [newReading, setNewReading] = useState({ title: '', memberId: '', dueDate: '' });
   const [newReward, setNewReward] = useState({ title: '', badgeCount: '', scope: 'family' });
   const [newResp, setNewResp] = useState({ text: '', memberId: '', frequency: 'daily1' });
-  const [newEvent, setNewEvent] = useState({ date: '', title: '', memberId: 'family' });
+  const [newEvent, setNewEvent] = useState({ date: '', endDate: '', title: '', memberId: 'family' });
   const [quickRespPending, setQuickRespPending] = useState(null);
   const [showResetMenu, setShowResetMenu] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
@@ -786,9 +786,13 @@ function SummerDashboard() {
   };
 
   const addEvent = () => { if (!newEvent.date || !newEvent.title.trim()) return;
-    setEvents([...events, { id: Date.now(), date: newEvent.date, title: newEvent.title.trim(),
+    // Only store endDate if it's set and after the start date
+    const hasEnd = newEvent.endDate && newEvent.endDate > newEvent.date;
+    setEvents([...events, { id: Date.now(), date: newEvent.date,
+      endDate: hasEnd ? newEvent.endDate : undefined,
+      title: newEvent.title.trim(),
       memberId: newEvent.memberId === 'family' ? 'family' : parseInt(newEvent.memberId) }]);
-    setNewEvent({ date: '', title: '', memberId: 'family' }); };
+    setNewEvent({ date: '', endDate: '', title: '', memberId: 'family' }); };
   const removeEvent = (id) => setEvents(events.filter(e => e.id !== id));
 
   const toggleMindset = (mid, wk) => {
@@ -943,7 +947,7 @@ function SummerDashboard() {
         .soh-form-grid.cols-add3 { grid-template-columns: 1.4fr 0.9fr 0.9fr auto; }
         .soh-form-grid.cols-goal5 { grid-template-columns: 1.3fr 70px 0.9fr 0.9fr auto; }
         .soh-form-grid.cols-reward { grid-template-columns: 1.4fr 0.7fr 1fr auto; }
-        .soh-form-grid.cols-event { grid-template-columns: 0.8fr 1.4fr 1fr auto; }
+        .soh-form-grid.cols-event { grid-template-columns: 0.8fr 0.8fr 1.4fr 1fr auto; }
 
         @media (max-width: 640px) {
           .soh-scribble-card { padding: 16px; border-radius: 16px; }
@@ -1664,17 +1668,58 @@ function CalendarSection({ open, setOpen, view, setView, monthOffset, setMonthOf
   // Selected day for the Day view (defaults to today)
   const [selectedDate, setSelectedDate] = useState(formatISO(new Date()));
 
+  // Per-member filter: 'all' | 'family' | memberId
+  const [memberFilter, setMemberFilter] = useState('all');
+
   const eventsByDate = useMemo(() => {
     const map = {};
     const push = (date, item) => { if (!date || date === 'end') return; (map[date] = map[date] || []).push(item); };
-    events.forEach(e => push(e.date, { kind: 'event', title: e.title, memberId: e.memberId,
-      color: e.memberId === 'family' ? C.coral : (family.find(f => f.id === e.memberId)?.color || C.coral), id: e.id }));
-    goals.forEach(g => g.dueDate && g.dueDate !== 'end' && push(g.dueDate, { kind: 'goal', title: g.title,
+
+    // Filter events first based on selected member
+    const filteredEvents = events.filter(e => {
+      if (memberFilter === 'all') return true;
+      if (memberFilter === 'family') return e.memberId === 'family';
+      return e.memberId === memberFilter;
+    });
+    const filteredGoals = goals.filter(g => {
+      if (memberFilter === 'all') return true;
+      if (memberFilter === 'family') return false; // goals are always per-person
+      return g.memberId === memberFilter;
+    });
+    const filteredReading = reading.filter(r => {
+      if (memberFilter === 'all') return true;
+      if (memberFilter === 'family') return false;
+      return r.memberId === memberFilter;
+    });
+
+    // Expand multi-day events across every date in their range
+    filteredEvents.forEach(e => {
+      const color = e.memberId === 'family' ? C.coral : (family.find(f => f.id === e.memberId)?.color || C.coral);
+      if (!e.endDate || e.endDate <= e.date) {
+        push(e.date, { kind: 'event', title: e.title, memberId: e.memberId, color, id: e.id });
+        return;
+      }
+      // Multi-day: iterate from start to end inclusive
+      const start = parseDate(e.date);
+      const end = parseDate(e.endDate);
+      if (!start || !end) { push(e.date, { kind: 'event', title: e.title, memberId: e.memberId, color, id: e.id }); return; }
+      const cur = new Date(start);
+      while (cur <= end) {
+        const iso = formatISO(cur);
+        const isStart = iso === e.date;
+        const isEnd = iso === e.endDate;
+        push(iso, { kind: 'event', title: e.title, memberId: e.memberId, color, id: e.id,
+          isMultiDay: true, isStart, isEnd });
+        cur.setDate(cur.getDate() + 1);
+      }
+    });
+
+    filteredGoals.forEach(g => g.dueDate && g.dueDate !== 'end' && push(g.dueDate, { kind: 'goal', title: g.title,
       color: family.find(f => f.id === g.memberId)?.color || C.navy }));
-    reading.forEach(r => r.dueDate && r.dueDate !== 'end' && push(r.dueDate, { kind: 'book', title: r.title,
+    filteredReading.forEach(r => r.dueDate && r.dueDate !== 'end' && push(r.dueDate, { kind: 'book', title: r.title,
       color: family.find(f => f.id === r.memberId)?.color || C.sage }));
     return map;
-  }, [events, goals, reading, family]);
+  }, [events, goals, reading, family, memberFilter]);
 
   // Month list for the summer
   const summerMonths = [
@@ -1710,7 +1755,7 @@ function CalendarSection({ open, setOpen, view, setView, monthOffset, setMonthOf
       {open && (
         <div style={{ padding: '0 24px 24px' }}>
           {/* View toggle */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
             {[
               { id: 'day', label: 'Today' },
               { id: 'week', label: 'This Week' },
@@ -1726,13 +1771,45 @@ function CalendarSection({ open, setOpen, view, setView, monthOffset, setMonthOf
             ))}
           </div>
 
+          {/* Per-member filter */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+              textTransform: 'uppercase', opacity: 0.55, marginRight: 4 }}>showing</span>
+            <button onClick={() => setMemberFilter('all')} style={{
+              background: memberFilter === 'all' ? C.ink : C.cream,
+              color: memberFilter === 'all' ? 'white' : C.ink,
+              border: 'none', borderRadius: 999, padding: '5px 12px',
+              fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
+            }}>Everyone</button>
+            <button onClick={() => setMemberFilter('family')} style={{
+              background: memberFilter === 'family' ? C.coral : C.cream,
+              color: memberFilter === 'family' ? 'white' : C.ink,
+              border: 'none', borderRadius: 999, padding: '5px 12px',
+              fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
+            }}>🏡 Whole family</button>
+            {family.map(m => (
+              <button key={m.id} onClick={() => setMemberFilter(m.id)} style={{
+                background: memberFilter === m.id ? m.color : C.cream,
+                color: memberFilter === m.id ? 'white' : C.ink,
+                border: 'none', borderRadius: 999, padding: '5px 12px',
+                fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
+              }}>{m.emoji} {m.name}</button>
+            ))}
+          </div>
+
           {/* Add event form */}
           <div className="soh-form-grid cols-event" style={{ marginBottom: 18 }}>
             <input type="date" className="soh-input" value={newEvent.date}
-              onChange={e => setNewEvent({ ...newEvent, date: e.target.value })} />
+              onChange={e => setNewEvent({ ...newEvent, date: e.target.value })}
+              title="Start date" />
+            <input type="date" className="soh-input" value={newEvent.endDate}
+              onChange={e => setNewEvent({ ...newEvent, endDate: e.target.value })}
+              min={newEvent.date || undefined}
+              placeholder="End (optional)"
+              title="End date (optional, for camps / vacations)" />
             <input className="soh-input" value={newEvent.title}
               onChange={e => setNewEvent({ ...newEvent, title: e.target.value })}
-              placeholder="Trip to grandma's, swim lessons..."
+              placeholder="Beach week, Lego camp, swim lessons..."
               onKeyDown={e => e.key === 'Enter' && addEvent()} />
             <select className="soh-input" value={newEvent.memberId}
               onChange={e => setNewEvent({ ...newEvent, memberId: e.target.value })}
@@ -1993,13 +2070,20 @@ function WeekView({ eventsByDate, removeEvent }) {
               {d.getDate()}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              {dayEvents.map((e, idx) => (
-                <div key={idx} style={{
-                  fontSize: 10, fontWeight: 600, padding: '2px 6px',
-                  background: e.color, color: 'white', borderRadius: 4,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }} title={e.title}>{e.title}</div>
-              ))}
+              {dayEvents.map((e, idx) => {
+                const mid = e.isMultiDay && !e.isStart && !e.isEnd;
+                const radius = e.isMultiDay
+                  ? `${e.isStart ? 4 : 0}px ${e.isEnd ? 4 : 0}px ${e.isEnd ? 4 : 0}px ${e.isStart ? 4 : 0}px`
+                  : '4px';
+                return (
+                  <div key={idx} style={{
+                    fontSize: 10, fontWeight: 600, padding: '2px 6px',
+                    background: e.color, color: 'white', borderRadius: radius,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    opacity: mid ? 0.88 : 1,
+                  }} title={e.title}>{e.isMultiDay && !e.isStart ? '↳ ' + e.title : e.title}</div>
+                );
+              })}
             </div>
           </div>
         );
@@ -2148,9 +2232,17 @@ function UpcomingList({ eventsByDate, removeEvent }) {
   const today = new Date(); today.setHours(0,0,0,0);
   const sevenDaysOut = new Date(today); sevenDaysOut.setDate(today.getDate() + 7);
   const upcoming = [];
+  const seenIds = new Set();
   Object.keys(eventsByDate).sort().forEach(dateStr => {
     const d = parseDate(dateStr); if (!d || d < today || d > sevenDaysOut) return;
-    eventsByDate[dateStr].forEach(e => upcoming.push({ ...e, date: dateStr }));
+    eventsByDate[dateStr].forEach(e => {
+      // For multi-day events, only show once (on the first day we encounter in the window)
+      if (e.kind === 'event' && e.isMultiDay && e.id != null) {
+        if (seenIds.has(e.id)) return;
+        seenIds.add(e.id);
+      }
+      upcoming.push({ ...e, date: dateStr });
+    });
   });
   if (upcoming.length === 0) {
     return (
@@ -2752,7 +2844,10 @@ function buildSummaryData({ themeWord, themeYear, family, bucket, goals, reading
     bucketRemaining: bucket.filter(b => !b.done).map(b => b.text),
     events: events.map(e => {
       const who = e.memberId === 'family' ? 'family' : (family.find(f => f.id === e.memberId)?.name || 'someone');
-      return `${prettyDate(e.date)}: ${e.title} (${who})`;
+      const when = e.endDate && e.endDate > e.date
+        ? `${prettyDate(e.date)}–${prettyDate(e.endDate)}`
+        : prettyDate(e.date);
+      return `${when}: ${e.title} (${who})`;
     }),
     photoCount: photos.length,
     photoCaptions: photos.map(p => p.caption).filter(Boolean),
