@@ -633,7 +633,28 @@ function SummerDashboard() {
   // ─── Auth: restore session on page load (handles magic-link returns too) ───
   useEffect(() => {
     let mounted = true;
+
+    // First: if Supabase put tokens in the URL (from magic-link redirect),
+    // explicitly process them. This catches the case where getSession()
+    // fires before the SDK has parsed the URL hash.
+    const processUrlSession = async () => {
+      const hash = window.location.hash;
+      if (hash && hash.includes('access_token')) {
+        try {
+          const params = new URLSearchParams(hash.substring(1));
+          const access_token = params.get('access_token');
+          const refresh_token = params.get('refresh_token');
+          if (access_token && refresh_token) {
+            await sb.auth.setSession({ access_token, refresh_token });
+            // Clean the URL so the tokens don't sit in the address bar
+            window.history.replaceState(null, '', window.location.pathname + window.location.search);
+          }
+        } catch (e) { console.warn('URL session parse failed:', e); }
+      }
+    };
+
     (async () => {
+      await processUrlSession();
       try {
         const { data: { session } } = await sb.auth.getSession();
         if (mounted && session && session.user && session.user.email) {
@@ -641,6 +662,7 @@ function SummerDashboard() {
         }
       } catch (e) { console.warn('Session check failed:', e); }
     })();
+
     // Listen for sign-in events (e.g. magic link click)
     const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session && session.user && session.user.email) {
