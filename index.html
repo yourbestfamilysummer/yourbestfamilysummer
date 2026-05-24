@@ -45,13 +45,13 @@
 <script>
   // ─── Supabase config (safe to be public — RLS policies protect the data) ───
   const SUPABASE_URL = 'https://twbcufubpnggzfqwcypz.supabase.co';
-  const SUPABASE_ANON_KEY = 'PASTE_YOUR_ANON_KEY_HERE';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR3YmN1ZnVicG5nZ3pmcXdjeXB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMzMzMTQsImV4cCI6MjA5NDgwOTMxNH0.c8PsH26aD4yrFw_jWMQPJ34zcPsdzwxQEzc9eSZ8Fco ';
   window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 </script>
 
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useMemo, useRef } = React;
-const supabase = window.supabaseClient;
+const sb = window.supabaseClient;
 
 // ───────── PALETTE (exact hex codes locked in from brand reference) ─────────
 const C = {
@@ -538,9 +538,9 @@ function SummerDashboard() {
 
     // Real users — pull from Supabase (source of truth)
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await sb.auth.getUser();
       if (user) {
-        const { data, error } = await supabase
+        const { data, error } = await sb
           .from('families')
           .select('data')
           .eq('user_id', user.id)
@@ -574,9 +574,9 @@ function SummerDashboard() {
 
     // Real users — sync to Supabase
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await sb.auth.getUser();
       if (!user) return;
-      const { error } = await supabase
+      const { error } = await sb
         .from('families')
         .upsert({ user_id: user.id, data: data }, { onConflict: 'user_id' });
       if (error) console.warn('Supabase save failed:', error.message);
@@ -635,14 +635,14 @@ function SummerDashboard() {
     let mounted = true;
     (async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { session } } = await sb.auth.getSession();
         if (mounted && session && session.user && session.user.email) {
           handleLogin(session.user.email, { fromSession: true });
         }
       } catch (e) { console.warn('Session check failed:', e); }
     })();
     // Listen for sign-in events (e.g. magic link click)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session && session.user && session.user.email) {
         handleLogin(session.user.email, { fromSession: true });
       }
@@ -677,7 +677,7 @@ function SummerDashboard() {
   const handleLogout = async () => {
     // Sign out of Supabase (unless we're in demo mode)
     if (!isDemoMode) {
-      try { await supabase.auth.signOut(); } catch (e) {}
+      try { await sb.auth.signOut(); } catch (e) {}
     }
     // Clear remembered email but keep their data in storage
     try { window.localStorage.removeItem(REMEMBERED_EMAIL_KEY); } catch (e) {}
@@ -4948,7 +4948,7 @@ function LoginScreen({ onLogin }) {
     setErrorMsg('');
     setSending(true);
     try {
-      const { error } = await supabase.auth.signInWithOtp({
+      const { error } = await sb.auth.signInWithOtp({
         email: clean,
         options: { emailRedirectTo: window.location.href.split('#')[0].split('?')[0] }
       });
