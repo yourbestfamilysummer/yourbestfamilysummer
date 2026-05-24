@@ -40,9 +40,18 @@
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script>
+  // ─── Supabase config (safe to be public — RLS policies protect the data) ───
+  const SUPABASE_URL = 'https://twbcufubpnggzfqwcypz.supabase.co';
+  const SUPABASE_ANON_KEY = 'PASTE_YOUR_ANON_KEY_HERE';
+  window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+</script>
 
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useMemo, useRef } = React;
+const supabase = window.supabaseClient;
 
 // ───────── PALETTE (exact hex codes locked in from brand reference) ─────────
 const C = {
@@ -168,8 +177,8 @@ function buildSampleFamilyData() {
       { id: 701, date: daysAhead(2), title: 'Swim lessons start', memberId: sadie.id },
       { id: 702, date: daysAhead(5), title: 'Family pizza night', memberId: 'family' },
       { id: 703, date: daysAhead(14), title: 'Trip to Grandma\'s', memberId: 'family' },
-      { id: 704, date: daysAhead(20), endDate: daysAhead(24), title: 'Caden\'s Lego camp', memberId: caden.id },
-      { id: 705, date: daysAhead(30), endDate: daysAhead(36), title: 'Beach week!', memberId: 'family' },
+      { id: 704, date: daysAhead(20), title: 'Caden\'s Lego camp', memberId: caden.id },
+      { id: 705, date: daysAhead(30), title: 'Beach week!', memberId: 'family' },
       { id: 706, date: daysAgo(7), title: 'Library reading challenge kickoff', memberId: 'family' },
     ],
     mindsetCheckins: {
@@ -482,12 +491,13 @@ function SummerDashboard() {
   const [reading, setReading] = useState([]);
   const [rewards, setRewards] = useState([]);
   const [responsibilities, setResponsibilities] = useState([]); // {id, memberId, text, frequency, completions, log}
-  const [events, setEvents] = useState([]);            // {id, date, endDate?, title, memberId, photo}
+  const [events, setEvents] = useState([]);            // {id, date, title, memberId, photo}
   const [mindsetCheckins, setMindsetCheckins] = useState({});
   const [photos, setPhotos] = useState([]);            // {id, dataUrl, caption, date}
   const [badgePlan, setBadgePlan] = useState(DEFAULT_BADGE_PLAN);
   const [loaded, setLoaded] = useState(false);
   const [userEmail, setUserEmail] = useState(null); // null = not logged in
+  const [isDemoMode, setIsDemoMode] = useState(false); // true = demo (skip Supabase)
 
   const [editingMember, setEditingMember] = useState(null);
   const [editingTheme, setEditingTheme] = useState(false);
@@ -499,7 +509,7 @@ function SummerDashboard() {
   const [newReading, setNewReading] = useState({ title: '', memberId: '', dueDate: '' });
   const [newReward, setNewReward] = useState({ title: '', badgeCount: '', scope: 'family' });
   const [newResp, setNewResp] = useState({ text: '', memberId: '', frequency: 'daily1' });
-  const [newEvent, setNewEvent] = useState({ date: '', endDate: '', title: '', memberId: 'family' });
+  const [newEvent, setNewEvent] = useState({ date: '', title: '', memberId: 'family' });
   const [quickRespPending, setQuickRespPending] = useState(null);
   const [showResetMenu, setShowResetMenu] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
@@ -507,43 +517,70 @@ function SummerDashboard() {
   const [meetingComplete, setMeetingComplete] = useState(null); // null = still checking storage
   const [showMeeting, setShowMeeting] = useState(false);
 
-  // ─── Storage helpers — dual layer (window.storage + localStorage) ───
-  // window.storage is a Claude artifact API that syncs across devices when available.
-  // localStorage works everywhere as fallback. We always write to both.
+  // ─── Storage helpers — Supabase-backed with localStorage cache ───
+  // Real data lives in Supabase (cross-device, secure via RLS).
+  // localStorage is kept as a fast local cache so the dashboard feels instant.
+  // Demo mode uses localStorage only (no signup required).
   const storageKey = (email) => `soh-dashboard:v5:${email.toLowerCase().trim()}`;
   const REMEMBERED_EMAIL_KEY = 'soh-remembered-email';
 
-  const loadFromStorage = async (email) => {
+  const loadFromStorage = async (email, options = {}) => {
     const key = storageKey(email);
-    // Try window.storage first (cross-device sync if available)
+
+    // Demo mode — localStorage only, never hit Supabase
+    if (options.demo) {
+      try {
+        const raw = window.localStorage.getItem(key);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+      return null;
+    }
+
+    // Real users — pull from Supabase (source of truth)
     try {
-      if (window.storage && typeof window.storage.get === 'function') {
-        const result = await window.storage.get(key);
-        if (result && result.value) {
-          return JSON.parse(result.value);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data, error } = await supabase
+          .from('families')
+          .select('data')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (!error && data && data.data) {
+          // Cache locally for next page-load speed
+          try { window.localStorage.setItem(key, JSON.stringify(data.data)); } catch (e) {}
+          return data.data;
         }
       }
-    } catch (e) { /* fall through to localStorage */ }
-    // Fall back to localStorage
+    } catch (e) { console.warn('Supabase load failed, falling back to cache:', e); }
+
+    // Fallback — local cache (offline / first-load before Supabase responds)
     try {
       const raw = window.localStorage.getItem(key);
       if (raw) return JSON.parse(raw);
-    } catch (e) { /* nothing saved */ }
+    } catch (e) {}
     return null;
   };
 
-  const saveToStorage = async (email, data) => {
+  const saveToStorage = async (email, data, options = {}) => {
     const key = storageKey(email);
     const json = JSON.stringify(data);
-    // Always write to localStorage (reliable everywhere)
+
+    // Always write to localStorage first (instant, offline-safe)
     try { window.localStorage.setItem(key, json); }
     catch (e) { console.warn('localStorage save failed (likely quota):', e); }
-    // Also try window.storage (cross-device when available)
+
+    // Demo mode stops here — never touches Supabase
+    if (options.demo) return;
+
+    // Real users — sync to Supabase
     try {
-      if (window.storage && typeof window.storage.set === 'function') {
-        await window.storage.set(key, json);
-      }
-    } catch (e) { /* silently fall back to localStorage only */ }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { error } = await supabase
+        .from('families')
+        .upsert({ user_id: user.id, data: data }, { onConflict: 'user_id' });
+      if (error) console.warn('Supabase save failed:', error.message);
+    } catch (e) { console.warn('Supabase save error:', e); }
   };
 
   // ─── Login flow ───
@@ -558,10 +595,12 @@ function SummerDashboard() {
 
     // DEMO MODE: load pre-built sample family
     if (options.demo) {
+      setIsDemoMode(true);
       loadDemoData();
       setLoaded(true);
       return;
     }
+    setIsDemoMode(false);
 
     // Normal flow — load this user's data
     const p = await loadFromStorage(cleanEmail);
@@ -591,6 +630,27 @@ function SummerDashboard() {
     setLoaded(true);
   };
 
+  // ─── Auth: restore session on page load (handles magic-link returns too) ───
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (mounted && session && session.user && session.user.email) {
+          handleLogin(session.user.email, { fromSession: true });
+        }
+      } catch (e) { console.warn('Session check failed:', e); }
+    })();
+    // Listen for sign-in events (e.g. magic link click)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session && session.user && session.user.email) {
+        handleLogin(session.user.email, { fromSession: true });
+      }
+    });
+    return () => { mounted = false; subscription.unsubscribe(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ─── Demo / sample data loader ───
   // Loads a fully populated family for testing/preview. Available as a button
   // on the login screen and on the dashboard footer.
@@ -614,10 +674,15 @@ function SummerDashboard() {
     setShowMeeting(false);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Sign out of Supabase (unless we're in demo mode)
+    if (!isDemoMode) {
+      try { await supabase.auth.signOut(); } catch (e) {}
+    }
     // Clear remembered email but keep their data in storage
     try { window.localStorage.removeItem(REMEMBERED_EMAIL_KEY); } catch (e) {}
     setUserEmail(null);
+    setIsDemoMode(false);
     setLoaded(false);
     // Reset all state to defaults
     setThemeWord('Happy'); setThemeYear('2026'); setCountdownLabel('end of summer'); setEndDate(DEFAULT_END);
@@ -632,8 +697,8 @@ function SummerDashboard() {
     saveToStorage(userEmail, {
       themeWord, themeYear, countdownLabel, endDate, family, bucket, goals, reading, rewards,
       responsibilities, events, mindsetCheckins, photos, meetingComplete, badgePlan,
-    });
-  }, [userEmail, themeWord, themeYear, countdownLabel, endDate, family, bucket, goals, reading, rewards,
+    }, { demo: isDemoMode });
+  }, [userEmail, isDemoMode, themeWord, themeYear, countdownLabel, endDate, family, bucket, goals, reading, rewards,
       responsibilities, events, mindsetCheckins, photos, meetingComplete, badgePlan, loaded]);
 
   // ─── Computed ───
@@ -786,13 +851,9 @@ function SummerDashboard() {
   };
 
   const addEvent = () => { if (!newEvent.date || !newEvent.title.trim()) return;
-    // Only store endDate if it's set and after the start date
-    const hasEnd = newEvent.endDate && newEvent.endDate > newEvent.date;
-    setEvents([...events, { id: Date.now(), date: newEvent.date,
-      endDate: hasEnd ? newEvent.endDate : undefined,
-      title: newEvent.title.trim(),
+    setEvents([...events, { id: Date.now(), date: newEvent.date, title: newEvent.title.trim(),
       memberId: newEvent.memberId === 'family' ? 'family' : parseInt(newEvent.memberId) }]);
-    setNewEvent({ date: '', endDate: '', title: '', memberId: 'family' }); };
+    setNewEvent({ date: '', title: '', memberId: 'family' }); };
   const removeEvent = (id) => setEvents(events.filter(e => e.id !== id));
 
   const toggleMindset = (mid, wk) => {
@@ -947,7 +1008,7 @@ function SummerDashboard() {
         .soh-form-grid.cols-add3 { grid-template-columns: 1.4fr 0.9fr 0.9fr auto; }
         .soh-form-grid.cols-goal5 { grid-template-columns: 1.3fr 70px 0.9fr 0.9fr auto; }
         .soh-form-grid.cols-reward { grid-template-columns: 1.4fr 0.7fr 1fr auto; }
-        .soh-form-grid.cols-event { grid-template-columns: 0.8fr 0.8fr 1.4fr 1fr auto; }
+        .soh-form-grid.cols-event { grid-template-columns: 0.8fr 1.4fr 1fr auto; }
 
         @media (max-width: 640px) {
           .soh-scribble-card { padding: 16px; border-radius: 16px; }
@@ -1668,58 +1729,17 @@ function CalendarSection({ open, setOpen, view, setView, monthOffset, setMonthOf
   // Selected day for the Day view (defaults to today)
   const [selectedDate, setSelectedDate] = useState(formatISO(new Date()));
 
-  // Per-member filter: 'all' | 'family' | memberId
-  const [memberFilter, setMemberFilter] = useState('all');
-
   const eventsByDate = useMemo(() => {
     const map = {};
     const push = (date, item) => { if (!date || date === 'end') return; (map[date] = map[date] || []).push(item); };
-
-    // Filter events first based on selected member
-    const filteredEvents = events.filter(e => {
-      if (memberFilter === 'all') return true;
-      if (memberFilter === 'family') return e.memberId === 'family';
-      return e.memberId === memberFilter;
-    });
-    const filteredGoals = goals.filter(g => {
-      if (memberFilter === 'all') return true;
-      if (memberFilter === 'family') return false; // goals are always per-person
-      return g.memberId === memberFilter;
-    });
-    const filteredReading = reading.filter(r => {
-      if (memberFilter === 'all') return true;
-      if (memberFilter === 'family') return false;
-      return r.memberId === memberFilter;
-    });
-
-    // Expand multi-day events across every date in their range
-    filteredEvents.forEach(e => {
-      const color = e.memberId === 'family' ? C.coral : (family.find(f => f.id === e.memberId)?.color || C.coral);
-      if (!e.endDate || e.endDate <= e.date) {
-        push(e.date, { kind: 'event', title: e.title, memberId: e.memberId, color, id: e.id });
-        return;
-      }
-      // Multi-day: iterate from start to end inclusive
-      const start = parseDate(e.date);
-      const end = parseDate(e.endDate);
-      if (!start || !end) { push(e.date, { kind: 'event', title: e.title, memberId: e.memberId, color, id: e.id }); return; }
-      const cur = new Date(start);
-      while (cur <= end) {
-        const iso = formatISO(cur);
-        const isStart = iso === e.date;
-        const isEnd = iso === e.endDate;
-        push(iso, { kind: 'event', title: e.title, memberId: e.memberId, color, id: e.id,
-          isMultiDay: true, isStart, isEnd });
-        cur.setDate(cur.getDate() + 1);
-      }
-    });
-
-    filteredGoals.forEach(g => g.dueDate && g.dueDate !== 'end' && push(g.dueDate, { kind: 'goal', title: g.title,
+    events.forEach(e => push(e.date, { kind: 'event', title: e.title, memberId: e.memberId,
+      color: e.memberId === 'family' ? C.coral : (family.find(f => f.id === e.memberId)?.color || C.coral), id: e.id }));
+    goals.forEach(g => g.dueDate && g.dueDate !== 'end' && push(g.dueDate, { kind: 'goal', title: g.title,
       color: family.find(f => f.id === g.memberId)?.color || C.navy }));
-    filteredReading.forEach(r => r.dueDate && r.dueDate !== 'end' && push(r.dueDate, { kind: 'book', title: r.title,
+    reading.forEach(r => r.dueDate && r.dueDate !== 'end' && push(r.dueDate, { kind: 'book', title: r.title,
       color: family.find(f => f.id === r.memberId)?.color || C.sage }));
     return map;
-  }, [events, goals, reading, family, memberFilter]);
+  }, [events, goals, reading, family]);
 
   // Month list for the summer
   const summerMonths = [
@@ -1755,7 +1775,7 @@ function CalendarSection({ open, setOpen, view, setView, monthOffset, setMonthOf
       {open && (
         <div style={{ padding: '0 24px 24px' }}>
           {/* View toggle */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap' }}>
             {[
               { id: 'day', label: 'Today' },
               { id: 'week', label: 'This Week' },
@@ -1771,45 +1791,13 @@ function CalendarSection({ open, setOpen, view, setView, monthOffset, setMonthOf
             ))}
           </div>
 
-          {/* Per-member filter */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
-              textTransform: 'uppercase', opacity: 0.55, marginRight: 4 }}>showing</span>
-            <button onClick={() => setMemberFilter('all')} style={{
-              background: memberFilter === 'all' ? C.ink : C.cream,
-              color: memberFilter === 'all' ? 'white' : C.ink,
-              border: 'none', borderRadius: 999, padding: '5px 12px',
-              fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
-            }}>Everyone</button>
-            <button onClick={() => setMemberFilter('family')} style={{
-              background: memberFilter === 'family' ? C.coral : C.cream,
-              color: memberFilter === 'family' ? 'white' : C.ink,
-              border: 'none', borderRadius: 999, padding: '5px 12px',
-              fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
-            }}>🏡 Whole family</button>
-            {family.map(m => (
-              <button key={m.id} onClick={() => setMemberFilter(m.id)} style={{
-                background: memberFilter === m.id ? m.color : C.cream,
-                color: memberFilter === m.id ? 'white' : C.ink,
-                border: 'none', borderRadius: 999, padding: '5px 12px',
-                fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
-              }}>{m.emoji} {m.name}</button>
-            ))}
-          </div>
-
           {/* Add event form */}
           <div className="soh-form-grid cols-event" style={{ marginBottom: 18 }}>
             <input type="date" className="soh-input" value={newEvent.date}
-              onChange={e => setNewEvent({ ...newEvent, date: e.target.value })}
-              title="Start date" />
-            <input type="date" className="soh-input" value={newEvent.endDate}
-              onChange={e => setNewEvent({ ...newEvent, endDate: e.target.value })}
-              min={newEvent.date || undefined}
-              placeholder="End (optional)"
-              title="End date (optional, for camps / vacations)" />
+              onChange={e => setNewEvent({ ...newEvent, date: e.target.value })} />
             <input className="soh-input" value={newEvent.title}
               onChange={e => setNewEvent({ ...newEvent, title: e.target.value })}
-              placeholder="Beach week, Lego camp, swim lessons..."
+              placeholder="Trip to grandma's, swim lessons..."
               onKeyDown={e => e.key === 'Enter' && addEvent()} />
             <select className="soh-input" value={newEvent.memberId}
               onChange={e => setNewEvent({ ...newEvent, memberId: e.target.value })}
@@ -2070,20 +2058,13 @@ function WeekView({ eventsByDate, removeEvent }) {
               {d.getDate()}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              {dayEvents.map((e, idx) => {
-                const mid = e.isMultiDay && !e.isStart && !e.isEnd;
-                const radius = e.isMultiDay
-                  ? `${e.isStart ? 4 : 0}px ${e.isEnd ? 4 : 0}px ${e.isEnd ? 4 : 0}px ${e.isStart ? 4 : 0}px`
-                  : '4px';
-                return (
-                  <div key={idx} style={{
-                    fontSize: 10, fontWeight: 600, padding: '2px 6px',
-                    background: e.color, color: 'white', borderRadius: radius,
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                    opacity: mid ? 0.88 : 1,
-                  }} title={e.title}>{e.isMultiDay && !e.isStart ? '↳ ' + e.title : e.title}</div>
-                );
-              })}
+              {dayEvents.map((e, idx) => (
+                <div key={idx} style={{
+                  fontSize: 10, fontWeight: 600, padding: '2px 6px',
+                  background: e.color, color: 'white', borderRadius: 4,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }} title={e.title}>{e.title}</div>
+              ))}
             </div>
           </div>
         );
@@ -2232,17 +2213,9 @@ function UpcomingList({ eventsByDate, removeEvent }) {
   const today = new Date(); today.setHours(0,0,0,0);
   const sevenDaysOut = new Date(today); sevenDaysOut.setDate(today.getDate() + 7);
   const upcoming = [];
-  const seenIds = new Set();
   Object.keys(eventsByDate).sort().forEach(dateStr => {
     const d = parseDate(dateStr); if (!d || d < today || d > sevenDaysOut) return;
-    eventsByDate[dateStr].forEach(e => {
-      // For multi-day events, only show once (on the first day we encounter in the window)
-      if (e.kind === 'event' && e.isMultiDay && e.id != null) {
-        if (seenIds.has(e.id)) return;
-        seenIds.add(e.id);
-      }
-      upcoming.push({ ...e, date: dateStr });
-    });
+    eventsByDate[dateStr].forEach(e => upcoming.push({ ...e, date: dateStr }));
   });
   if (upcoming.length === 0) {
     return (
@@ -2844,10 +2817,7 @@ function buildSummaryData({ themeWord, themeYear, family, bucket, goals, reading
     bucketRemaining: bucket.filter(b => !b.done).map(b => b.text),
     events: events.map(e => {
       const who = e.memberId === 'family' ? 'family' : (family.find(f => f.id === e.memberId)?.name || 'someone');
-      const when = e.endDate && e.endDate > e.date
-        ? `${prettyDate(e.date)}–${prettyDate(e.endDate)}`
-        : prettyDate(e.date);
-      return `${when}: ${e.title} (${who})`;
+      return `${prettyDate(e.date)}: ${e.title} (${who})`;
     }),
     photoCount: photos.length,
     photoCaptions: photos.map(p => p.caption).filter(Boolean),
@@ -4953,6 +4923,9 @@ function WizardNav({ onBack, onNext, nextDisabled, nextLabel = 'Continue →' })
 function LoginScreen({ onLogin }) {
   const [email, setEmail] = useState('');
   const [rememberedEmail, setRememberedEmail] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
     try {
@@ -4964,16 +4937,33 @@ function LoginScreen({ onLogin }) {
     } catch (e) {}
   }, []);
 
-  const submit = (e) => {
+  const submit = async (e) => {
     if (e) e.preventDefault();
-    const clean = email.trim();
+    const clean = email.trim().toLowerCase();
     if (!clean) return;
-    // Basic email shape check (very lenient — we're not authenticating)
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
-      alert('Please enter a valid email address.');
+      setErrorMsg('Please enter a valid email address.');
       return;
     }
-    onLogin(clean);
+    setErrorMsg('');
+    setSending(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: clean,
+        options: { emailRedirectTo: window.location.href.split('#')[0].split('?')[0] }
+      });
+      if (error) {
+        setErrorMsg(error.message || 'Could not send link. Try again in a moment.');
+        setSending(false);
+        return;
+      }
+      // Remember this email for next visit
+      try { window.localStorage.setItem('soh-remembered-email', clean); } catch (e) {}
+      setSent(true);
+    } catch (err) {
+      setErrorMsg('Could not send link. Check your internet and try again.');
+    }
+    setSending(false);
   };
 
   // Rainbow renderer for the welcome heading
@@ -5042,42 +5032,73 @@ function LoginScreen({ onLogin }) {
           </h1>
 
           <p style={{ marginTop: 24, fontSize: 16, lineHeight: 1.6, color: C.ink, opacity: 0.85, maxWidth: 440 }}>
-            {rememberedEmail
-              ? 'Tap to pick up right where you left off — your summer dashboard is waiting.'
-              : 'Enter your email to begin. Your dashboard saves under this email, so you can come back anytime — even on a different device.'}
+            {sent
+              ? "We just sent you a link. Open your email on this device, click the link, and you're in."
+              : rememberedEmail
+                ? 'Tap to send yourself a fresh sign-in link.'
+                : 'Enter your email — we\'ll send you a link to sign in. No password to remember.'}
           </p>
 
-          <form onSubmit={submit} style={{ marginTop: 28, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-              placeholder="your.email@example.com" autoFocus
-              style={{
-                padding: '14px 18px', borderRadius: 14,
-                border: `2px solid ${C.ink}15`, background: C.paper,
-                fontSize: 16, color: C.ink, outline: 'none',
-                fontFamily: 'inherit', fontWeight: 600, textAlign: 'center',
-                transition: 'border-color 0.15s ease',
-              }}
-              onFocus={e => e.target.style.borderColor = C.coral}
-              onBlur={e => e.target.style.borderColor = `${C.ink}15`} />
+          {sent ? (
+            <div style={{ marginTop: 28 }}>
+              <div style={{
+                padding: '18px 20px', borderRadius: 14,
+                background: `${C.sage}22`, border: `2px solid ${C.sage}55`,
+                color: C.ink, fontWeight: 600, fontSize: 15,
+              }}>
+                ✉️ Link sent to <strong style={{ color: C.coral }}>{email}</strong>
+              </div>
+              <p style={{ marginTop: 18, fontSize: 13, lineHeight: 1.6, color: C.ink, opacity: 0.7 }}>
+                Can't find it? Check your spam folder. The link works for one hour.
+              </p>
+              <button onClick={() => { setSent(false); setErrorMsg(''); }} style={{
+                marginTop: 14, background: 'transparent', border: 'none',
+                color: C.coral, fontWeight: 700, fontSize: 14, cursor: 'pointer',
+                fontFamily: 'inherit', textDecoration: 'underline',
+              }}>
+                Use a different email
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={submit} style={{ marginTop: 28, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <input type="email" value={email} onChange={e => { setEmail(e.target.value); setErrorMsg(''); }}
+                placeholder="your.email@example.com" autoFocus disabled={sending}
+                style={{
+                  padding: '14px 18px', borderRadius: 14,
+                  border: `2px solid ${errorMsg ? C.coral : C.ink + '15'}`, background: C.paper,
+                  fontSize: 16, color: C.ink, outline: 'none',
+                  fontFamily: 'inherit', fontWeight: 600, textAlign: 'center',
+                  transition: 'border-color 0.15s ease',
+                  opacity: sending ? 0.6 : 1,
+                }}
+                onFocus={e => { if (!errorMsg) e.target.style.borderColor = C.coral; }}
+                onBlur={e => { if (!errorMsg) e.target.style.borderColor = `${C.ink}15`; }} />
 
-            <button type="submit" disabled={!email.trim()} style={{
-              padding: '14px 28px', borderRadius: 999, border: 'none',
-              background: email.trim() ? C.coral : C.cream,
-              color: email.trim() ? 'white' : C.inkSoft,
-              fontFamily: 'inherit', fontWeight: 700, fontSize: 16,
-              cursor: email.trim() ? 'pointer' : 'not-allowed',
-              boxShadow: email.trim() ? `0 4px 0 ${C.ink}20` : 'none',
-              transition: 'transform 0.12s ease',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            }}
-              onMouseEnter={e => { if (email.trim()) e.currentTarget.style.transform = 'translateY(-1px)'; }}
-              onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}>
-              {rememberedEmail ? "Let's go →" : "Begin →"}
-            </button>
-          </form>
+              {errorMsg && (
+                <p style={{ margin: 0, fontSize: 13, color: C.coral, fontWeight: 600, textAlign: 'center' }}>
+                  {errorMsg}
+                </p>
+              )}
+
+              <button type="submit" disabled={!email.trim() || sending} style={{
+                padding: '14px 28px', borderRadius: 999, border: 'none',
+                background: email.trim() && !sending ? C.coral : C.cream,
+                color: email.trim() && !sending ? 'white' : C.inkSoft,
+                fontFamily: 'inherit', fontWeight: 700, fontSize: 16,
+                cursor: email.trim() && !sending ? 'pointer' : 'not-allowed',
+                boxShadow: email.trim() && !sending ? `0 4px 0 ${C.ink}20` : 'none',
+                transition: 'transform 0.12s ease',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}
+                onMouseEnter={e => { if (email.trim() && !sending) e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}>
+                {sending ? 'Sending…' : (rememberedEmail ? "Send me a link →" : "Send me a link →")}
+              </button>
+            </form>
+          )}
 
           <p style={{ marginTop: 22, fontSize: 12, lineHeight: 1.5, color: C.ink, opacity: 0.55, maxWidth: 400, marginLeft: 'auto', marginRight: 'auto' }}>
-            ✨ No password needed — your email is your key. Saves automatically as you go.
+            ✨ No password needed — we email you a one-tap sign-in link. Saves automatically as you go.
           </p>
 
           {/* DEMO MODE — for testing & previewing the full product */}
