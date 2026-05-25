@@ -883,11 +883,55 @@ function SummerDashboard() {
     setMindsetCheckins(prev => { const next = { ...prev }; if (next[k]) delete next[k]; else next[k] = true; return next; });
   };
 
-  const addPhoto = (dataUrl, caption) => {
-    setPhotos([...photos, { id: Date.now() + Math.random(), dataUrl, caption: caption || '', date: formatISO(new Date()) }]);
+ const addPhoto = async (file, caption) => {
+    // Demo mode: keep old behavior, store as base64 in memory only
+    if (isDemoMode) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setPhotos(prev => [...prev, {
+          id: Date.now() + Math.random(),
+          dataUrl: ev.target.result,
+          caption: caption || '',
+          date: formatISO(new Date()),
+        }]);
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+    // Real users: upload to Supabase Storage
+    try {
+      const { data: { user } } = await sb.auth.getUser();
+      if (!user) { console.warn('addPhoto: no user'); return; }
+      const photoId = Date.now() + Math.random();
+      const ext = (file.type === 'image/png') ? 'png' : 'jpg';
+      const path = `${user.id}/${photoId}.${ext}`;
+      const { error } = await sb.storage.from('family-photos')
+        .upload(path, file, { contentType: file.type, upsert: false });
+      if (error) { console.error('Photo upload failed:', error); alert('Photo upload failed. Please try again.'); return; }
+      setPhotos(prev => [...prev, {
+        id: photoId,
+        path,
+        caption: caption || '',
+        date: formatISO(new Date()),
+      }]);
+    } catch (e) {
+      console.error('addPhoto error:', e);
+      alert('Photo upload failed. Please try again.');
+    }
   };
   const updatePhotoCaption = (id, caption) => setPhotos(photos.map(p => p.id === id ? { ...p, caption } : p));
-  const removePhoto = (id) => setPhotos(photos.filter(p => p.id !== id));
+  const removePhoto = async (id) => {
+    const photo = photos.find(p => p.id === id);
+    setPhotos(prev => prev.filter(p => p.id !== id));
+    // Demo mode or no path: nothing to delete from Storage
+    if (isDemoMode || !photo || !photo.path) return;
+    try {
+      const { error } = await sb.storage.from('family-photos').remove([photo.path]);
+      if (error) console.warn('Photo delete from Storage failed:', error);
+    } catch (e) {
+      console.warn('removePhoto error:', e);
+    }
+  };
 
   // ─── Family Meeting handlers ───
   const completeMeeting = (wizardData) => {
@@ -1351,8 +1395,8 @@ function SummerDashboard() {
 
         {/* ─── PHOTOS ─── */}
         <SectionLabel title="summer photos" icon={<IconCamera size={20} />} accent={C.orange} />
-        <PhotoSection photos={photos} addPhoto={addPhoto}
-          updateCaption={updatePhotoCaption} removePhoto={removePhoto} />
+        <PhotoSection photos={photos} addPhoto={addPhoto} isDemoMode={isDemoMode}
+  updateCaption={updatePhotoCaption} removePhoto={removePhoto} />
 
         {/* ─── REWARDS ─── */}
         <SectionLabel title="family rewards" icon={<IconGift size={20} />} accent={C.rose} />
@@ -2533,35 +2577,77 @@ function BadgeProgressBar({ def, config, progress, memberColor, isFamilyWide }) 
 // ═══════════════════════════════════════════════════════════════════
 // PHOTOS
 // ═══════════════════════════════════════════════════════════════════
-function PhotoSection({ photos, addPhoto, updateCaption, removePhoto }) {
+function PhotoSection({ photos, addPhoto, updateCaption, removePhoto, isDemoMode }) {
   const fileRef = useRef(null);
+  const [urls, setUrls] = useState({}); // photoId -> signed URL for display
+  const [uploading, setUploading] = useState(false);
 
-  const handleFiles = (files) => {
-    Array.from(files).forEach(file => {
-      if (!file.type.startsWith('image/')) return;
-      // Resize to reasonable max dimension before storing
-      const img = new Image();
-      const reader = new FileReader();
-      reader.onload = ev => {
-        img.onload = () => {
-          const maxDim = 1200;
-          let { width, height } = img;
-          if (width > maxDim || height > maxDim) {
-            const scale = maxDim / Math.max(width, height);
-            width = Math.round(width * scale); height = Math.round(height * scale);
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = width; canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-          addPhoto(dataUrl, '');
-        };
-        img.src = ev.target.result;
+  // Resize a file in the browser and return a new File object
+  const resizeFile = (file) => new Promise((resolve) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      img.onload = () => {
+        const maxDim = 1600;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => {
+          const resized = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' });
+          resolve(resized);
+        }, 'image/jpeg', 0.85);
       };
-      reader.readAsDataURL(file);
-    });
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const handleFiles = async (files) => {
+    setUploading(true);
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith('image/')) continue;
+      try {
+        const resized = await resizeFile(file);
+        await addPhoto(resized, '');
+      } catch (e) {
+        console.error('Photo handling failed:', e);
+      }
+    }
+    setUploading(false);
   };
+
+  // Fetch signed URLs for any photos that don't have one yet
+  useEffect(() => {
+    const fetchUrls = async () => {
+      const next = { ...urls };
+      let changed = false;
+      for (const p of photos) {
+        if (next[p.id]) continue;
+        if (p.dataUrl) { next[p.id] = p.dataUrl; changed = true; continue; }
+        if (!p.path) continue;
+        try {
+          const { data, error } = await sb.storage.from('family-photos')
+            .createSignedUrl(p.path, 3600);
+          if (!error && data?.signedUrl) { next[p.id] = data.signedUrl; changed = true; }
+        } catch (e) { /* skip */ }
+      }
+      if (changed) setUrls(next);
+    };
+    if (!isDemoMode && photos.length) fetchUrls();
+    else if (isDemoMode) {
+      // Demo mode: dataUrl is the URL
+      const next = {};
+      photos.forEach(p => { if (p.dataUrl) next[p.id] = p.dataUrl; });
+      setUrls(next);
+    }
+  }, [photos, isDemoMode]);
 
   return (
     <div className="soh-scribble-card" style={{ marginBottom: 56 }}>
@@ -2573,21 +2659,29 @@ function PhotoSection({ photos, addPhoto, updateCaption, removePhoto }) {
           Capture summer moments. These can be added to your photo book or summary story.
         </p>
         <button className="soh-pill-btn" onClick={() => fileRef.current?.click()}
-          style={{ background: C.orange, color: 'white' }}>
-          <IconPlus size={16} /> Upload photos
+          disabled={uploading}
+          style={{ background: C.orange, color: 'white', opacity: uploading ? 0.6 : 1 }}>
+          <IconPlus size={16} /> {uploading ? 'Uploading…' : 'Upload photos'}
         </button>
       </div>
       {photos.length === 0 ? (
-        <EmptyState text="No photos yet. Upload some to bring your summer story to life!" />
+        <EmptyState text="No photos yet. Upload some to bring your summer story to life." />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
           {photos.map(p => (
             <div key={p.id} style={{ background: C.cream, borderRadius: 12, padding: 8, position: 'relative' }}>
               <div style={{ position: 'relative', paddingTop: '100%',
                 background: C.paper, borderRadius: 8, overflow: 'hidden', marginBottom: 6 }}>
-                <img src={p.dataUrl} alt={p.caption || 'photo'} style={{
-                  position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover'
-                }} />
+                {urls[p.id] ? (
+                  <img src={urls[p.id]} alt={p.caption || 'photo'} style={{
+                    position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover'
+                  }} />
+                ) : (
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', fontSize: 12, opacity: 0.5 }}>
+                    Loading…
+                  </div>
+                )}
                 <button onClick={() => removePhoto(p.id)} style={{
                   position: 'absolute', top: 6, right: 6,
                   background: 'rgba(0,0,0,0.6)', color: 'white',
